@@ -1,4 +1,4 @@
 #!/bin/bash
-export FIREBASE_PROJECT_ID=edeka-mango
-export FIREBASE_SERVICE_ACCOUNT_JSON=`cat ~/.secrets/edeka-mango-firebase-adminsdk.json`
+export FIREBASE_PROJECT_ID=$PROJECT_ID
+export FIREBASE_SERVICE_ACCOUNT_JSON=`cat $FIREBASE_SECRET_FILE`
 go run main.go "$@"
