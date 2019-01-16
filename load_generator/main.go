@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"cloud.google.com/go/firestore"
 
@@ -32,6 +33,8 @@ func main() {
 	var wg sync.WaitGroup
 	wg.Add(int(*c))
 
+	startTime := time.Now()
+
 	numTotal := uint(0)
 	for r := uint(0); r < *c; r++ {
 
@@ -47,7 +50,12 @@ func main() {
 
 	fmt.Printf("Waiting for write routines to finish...\n")
 	wg.Wait()
+	endTime := time.Now()
+
+	tookTime := endTime.Sub(startTime)
+
 	fmt.Printf("Data load generation done\n")
+	fmt.Printf("Took: %s \n", tookTime)
 }
 
 func addToFirestore(wg *sync.WaitGroup, col *firestore.CollectionRef, n uint) {

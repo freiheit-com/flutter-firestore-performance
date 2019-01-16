@@ -48,15 +48,31 @@ class StreamMeasureWidget extends StatefulWidget {
 
 class _StreamMeasureWidgetState extends State<StreamMeasureWidget> {
   int _counter = 0;
+  int _stopCount = -1;
+  DateTime _stopTime;
+
+  bool showSnapshot = false;
+
+  bool initialUpdate = true;
+  DateTime startTime;
 
   _StreamMeasureWidgetState() {
+    /*
     Firestore.instance
         .collection(_performanceTestCollection)
         .snapshots()
         .listen(updateCounter);
+  */
   }
 
   void addToCount(int n) {
+
+    if(_stopCount != -1 && _counter + n >= _stopCount) {
+      setState(() {
+        _stopTime = DateTime.now();
+      });
+    }
+
     setState(() {
       _counter += n;
     });
@@ -66,19 +82,63 @@ class _StreamMeasureWidgetState extends State<StreamMeasureWidget> {
     int added = 0;
 
     for (DocumentChange change in snap.documentChanges) {
+
+      if(!initialUpdate && startTime == null) {
+        startTime = DateTime.now();
+      }
+
       if (change.type == DocumentChangeType.added) {
         added++;
       }
     }
 
+    if(initialUpdate) {
+      print("Initial update done!");
+      initialUpdate = false;
+    }
+
     addToCount(added);
+  }
+
+  Widget counterWidget() {
+
+    if(!showSnapshot) {
+      /*
+      Future.delayed(Duration(days: 0)).then((_){
+        setState(() {
+              showSnapshot=false;
+        });
+      });
+      */
+      return StreamBuilder(stream:     Firestore.instance
+          .collection(_performanceTestCollection)
+          .snapshots(), builder: (context, snapshot) {
+        if (snapshot.hasData) {
+          return Text(snapshot.data.documents.length.toString());
+        }
+        return Text("-");
+      },);
+    } else {
+      return Text("no snapshot");
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+
+
+    String startedInfo = "";
+    String diffStr = "";
+
+    if(startTime != null && _stopTime != null) {
+       startedInfo = "";
+       diffStr = "Took: " + _stopTime.difference(startTime).toString();
+    } else if (startTime != null) {
+      startedInfo = "Measurement running";
+    }
+
     return Scaffold(
       appBar: AppBar(
-
         title: Text(widget.title),
       ),
       body: Center(
@@ -88,10 +148,34 @@ class _StreamMeasureWidgetState extends State<StreamMeasureWidget> {
             Text(
               'Received this many new documents:',
             ),
+            counterWidget(),
+            /*
             Text(
               '$_counter',
               style: Theme.of(context).textTheme.display1,
+            ),*/
+            TextFormField(
+              initialValue: "-1",
+              keyboardType: TextInputType.numberWithOptions(signed: false, decimal: false),
+              onFieldSubmitted: (String newVal) {
+                setState(() {
+                  _stopCount = int.parse(newVal);
+                  startTime = null;
+                  _stopTime = null;
+                });
+
+               },
             ),
+            Text(startedInfo),
+            Text(diffStr),
+            CircularProgressIndicator(),
+            FlatButton(
+              child: Text("Show"),
+              onPressed: () {
+              setState((){
+                showSnapshot = true;
+              });
+            },)
           ],
         ),
       ),
