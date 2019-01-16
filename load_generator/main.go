@@ -45,7 +45,8 @@ func main() {
 		}
 
 		numTotal += num
-		go addToFirestore(&wg, col, num)
+		//go addToFirestore(&wg, col, num)
+		go addBatchedToFirestore(client, &wg, col, num)
 	}
 
 	fmt.Printf("Waiting for write routines to finish...\n")
@@ -56,6 +57,27 @@ func main() {
 
 	fmt.Printf("Data load generation done\n")
 	fmt.Printf("Took: %s \n", tookTime)
+}
+
+func addBatchedToFirestore(client *firestore.Client, wg *sync.WaitGroup, col *firestore.CollectionRef, n uint) {
+	testData := TestData{
+		Type: "test",
+		Data: "some test data",
+	}
+
+	batch := client.Batch()
+
+	for i := uint(0); i < n; i++ {
+		doc := col.NewDoc()
+		_ = batch.Create(doc, &testData)
+	}
+
+	_, err := batch.Commit(context.Background())
+	if err != nil {
+		log.Printf("Batch commit failed: %#v\n", err)
+	}
+
+	wg.Done()
 }
 
 func addToFirestore(wg *sync.WaitGroup, col *firestore.CollectionRef, n uint) {
