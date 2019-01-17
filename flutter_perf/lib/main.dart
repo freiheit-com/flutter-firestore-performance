@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:isolate';
 import 'dart:io';
+import 'dart:async';
 
 void main() => runApp(MyApp());
 
-final String _performanceTestCollection = 'performance-test';
+final String _performanceTestCollection = 'perf-test3';
+final String _batchCollection = 'perf-test-batches';
 
 class MyApp extends StatelessWidget {
   // This widget is the root of your application.
@@ -90,27 +92,61 @@ class _StreamMeasureWidgetState extends State<StreamMeasureWidget> {
   int _stopCount = -1;
   DateTime _stopTime;
 
-  bool showSnapshot = false;
-
   bool initialUpdate = true;
   DateTime startTime;
 
-  _StreamMeasureWidgetState() {
-    final response = new ReceivePort();
-    print("spawning isolate");
-    //Isolate.spawn(listenToFirestoreUpdate, response.sendPort);
+  String queryResult = "";
 
-    var result =
-        Firestore().collection(_performanceTestCollection)
-            .snapshots().listen(
-      updateCounter,
-      onError: (e) {
-        print("Listen err " + e.toString());
-      },
-      onDone: () {
-        print("Listen done");
-      },
-    );
+  _StreamMeasureWidgetState() {
+    startBatchedUpdate();
+    startBacklogTimer();
+  }
+
+  void startBatchedUpdate() {
+    //TODO query batches with stored last timestamp on app-start
+    Firestore().collection(_batchCollection).snapshots().listen(loadBatch);
+  }
+
+  List<int> backlog = List();
+
+  void loadBatch(QuerySnapshot snap) {
+    for (DocumentChange change in snap.documentChanges) {
+      backlog.add(change.document.data['BatchID']);
+    }
+  }
+
+  void startBacklogTimer() {
+    Timer.periodic(Duration(seconds: 3), checkBacklog);
+  }
+
+  void checkBacklog(Timer timer) {
+    print("checking backlog, length = " + backlog.length.toString());
+    if(backlog.length != 0) {
+      timer.cancel();
+
+      workOffBacklog();
+    }
+  }
+
+  void workOffBacklog() {
+
+    //TODO Query more than one batch in parallel (depending on app performance)
+    //TEST
+
+    int batchId = backlog.removeAt(0);
+
+    Firestore().collection(_performanceTestCollection)
+        .where('BatchID', isEqualTo: batchId).snapshots().listen(handleBatchResult);
+  }
+
+  void handleBatchResult(QuerySnapshot snap) {
+    print("##handleBatchResult, len = " + snap.documents.length.toString());
+    updateCounter(snap);
+    if(backlog.length > 0) {
+      workOffBacklog();
+    } else {
+      startBacklogTimer();
+    }
   }
 
   void addToCount(int n, bool doSetState) {
@@ -121,26 +157,28 @@ class _StreamMeasureWidgetState extends State<StreamMeasureWidget> {
       });
     }
 
-    if(doSetState) {
+    if (doSetState) {
       setState(() {
         _counter += n;
       });
     } else {
       _counter += n;
     }
-
   }
 
   void updateCounter(QuerySnapshot snap) {
     int added = 0;
 
     for (DocumentChange change in snap.documentChanges) {
+      //TODO Set start time on first non-empty result received
       if (!initialUpdate && startTime == null) {
         startTime = DateTime.now();
       }
 
       if (change.type == DocumentChangeType.added) {
         added++;
+      } else if (change.type == DocumentChangeType.removed) {
+        added--;
       }
     }
 
@@ -149,26 +187,9 @@ class _StreamMeasureWidgetState extends State<StreamMeasureWidget> {
       initialUpdate = false;
       addToCount(added, true);
     } else {
-      addToCount(added, false); //doSetState = false
+      addToCount(added, true);
     }
   }
-
-  /*
-  Widget counterWidget() {
-
-    if(showSnapshot) {
-      return StreamBuilder(stream:     Firestore.instance
-          .collection(_performanceTestCollection)
-          .snapshots(), builder: (context, snapshot) {
-        if (snapshot.hasData) {
-          return Text(snapshot.data.documents.length.toString());
-        }
-        return Text("-");
-      },);
-    } else {
-      return Text("no snapshot");
-    }
-  }*/
 
   @override
   Widget build(BuildContext context) {
@@ -186,18 +207,22 @@ class _StreamMeasureWidgetState extends State<StreamMeasureWidget> {
       appBar: AppBar(
         title: Text(widget.title),
       ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+      body: Column(
+          mainAxisAlignment: MainAxisAlignment.start,
           children: <Widget>[
-            Text(
+            Padding(
+              padding: EdgeInsets.only(top: 50.0),
+      child: Text(
               'Received this many new documents:',
-            ),
-            //counterWidget(),
-
+            )),
             Text(
               '$_counter',
               style: Theme.of(context).textTheme.display1,
+            ),
+            CircularProgressIndicator(),
+            Padding(
+              padding: EdgeInsets.only(top: 30.0),
+              child: Text('Measure until:'),
             ),
             TextFormField(
               initialValue: "-1",
@@ -213,18 +238,45 @@ class _StreamMeasureWidgetState extends State<StreamMeasureWidget> {
             ),
             Text(startedInfo),
             Text(diffStr),
-            CircularProgressIndicator(),
-            FlatButton(
-              child: Text("Show"),
-              onPressed: () {
-                setState(() {
-                  showSnapshot = true;
-                });
+            Padding(
+              padding: EdgeInsets.only(top: 30.0),
+              child: Text('Query ID:'),
+            ),
+
+            TextFormField(
+              initialValue: "0",
+              onFieldSubmitted: (String newVal) {
+                int queryId = int.parse(newVal);
+                queryDocumentAndShowResult(queryId);
               },
-            )
+            ),
+            Text(queryResult)
           ],
         ),
-      ),
-    );
+      );
+  }
+
+  void queryDocumentAndShowResult(int queryId) {
+    setState(() {
+      queryResult = "";
+    });
+    print("Starting query for id: " + queryId.toString());
+    Firestore().collection(_performanceTestCollection)
+        //.orderBy('DataID', descending: true).limit(1).snapshots().listen(addQueryResult);
+        .where('DataID', isEqualTo: queryId).snapshots().listen(addQueryResult);
+  }
+
+  void addQueryResult(QuerySnapshot snap) {
+
+    print("received query result " + snap.documentChanges.length.toString() + " " + snap.documents.length.toString() );
+
+    String result = "";
+    for (DocumentSnapshot change in snap.documents) {
+      result = result + change.data.toString() + "\n";
+    }
+    setState(() {
+      queryResult = result;
+    });
   }
 }
+
