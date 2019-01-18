@@ -3,11 +3,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:isolate';
 import 'dart:io';
 import 'dart:async';
+import 'dart:math';
 
 void main() => runApp(MyApp());
 
 final String _performanceTestCollection = 'perf-test3';
 final String _batchCollection = 'perf-test-batches';
+final int maxConcurrencyLoad = 5;
 
 class MyApp extends StatelessWidget {
   // This widget is the root of your application.
@@ -102,16 +104,32 @@ class _StreamMeasureWidgetState extends State<StreamMeasureWidget> {
     startBacklogTimer();
   }
 
+
+  /** async batch load state variables **/
+  List<int> backlog = List(); //TODO that should be queue
+  int pendingBatchLoads = 0;
+  int workedOffBatches = 0;
+
+
   void startBatchedUpdate() {
+
     //TODO query batches with stored last timestamp on app-start
+    //if batch successfully processed, timestamp is saved (if lower??)
+
+
     Firestore().collection(_batchCollection).snapshots().listen(loadBatch);
   }
 
-  List<int> backlog = List();
 
   void loadBatch(QuerySnapshot snap) {
     for (DocumentChange change in snap.documentChanges) {
-      backlog.add(change.document.data['BatchID']);
+      if (change.type == DocumentChangeType.added) {
+        backlog.add(change.document.data['BatchID']);
+      } else {
+        //what TODO if backlog entry is deleted (query again to see if data are also deleted)
+        //as for now: ignore entry and do nothing
+        print("backlog entry " + change.document.data['BatchID'] + "deleted");
+      }
     }
   }
 
@@ -120,7 +138,7 @@ class _StreamMeasureWidgetState extends State<StreamMeasureWidget> {
   }
 
   void checkBacklog(Timer timer) {
-    print("checking backlog, length = " + backlog.length.toString());
+    print("checking backlog, length=" + backlog.length.toString() + ", workedOffBatches=" + workedOffBatches.toString());
     if(backlog.length != 0) {
       timer.cancel();
 
@@ -130,17 +148,26 @@ class _StreamMeasureWidgetState extends State<StreamMeasureWidget> {
 
   void workOffBacklog() {
 
-    //TODO Query more than one batch in parallel (depending on app performance)
-    //TEST
+    print("#### backlog size is: " + backlog.length.toString() +
+         ", pendingBatchLoads = " + pendingBatchLoads.toString());
 
-    int batchId = backlog.removeAt(0);
+    int loadsToStart = min(backlog.length, maxConcurrencyLoad);
+    loadsToStart -= pendingBatchLoads;
 
-    Firestore().collection(_performanceTestCollection)
-        .where('BatchID', isEqualTo: batchId).snapshots().listen(handleBatchResult);
+    for(int i=0;i<loadsToStart;i++) {
+      int batchId = backlog.removeAt(0);
+      Firestore().collection(_performanceTestCollection)
+          .where('BatchID', isEqualTo: batchId).snapshots().listen((QuerySnapshot snap) {handleBatchResult(batchId, snap);});
+      pendingBatchLoads += 1;
+    }
   }
 
-  void handleBatchResult(QuerySnapshot snap) {
-    print("##handleBatchResult, len = " + snap.documents.length.toString());
+  void handleBatchResult(int batchID, QuerySnapshot snap) {
+    pendingBatchLoads -= 1;
+    workedOffBatches += 1;
+
+    print("##handleBatchResult, len = " + snap.documents.length.toString() + " batchID=" + batchID.toString());
+
     updateCounter(snap);
     if(backlog.length > 0) {
       workOffBacklog();
