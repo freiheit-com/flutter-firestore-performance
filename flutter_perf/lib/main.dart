@@ -100,8 +100,12 @@ class _StreamMeasureWidgetState extends State<StreamMeasureWidget> {
   String queryResult = "";
 
   _StreamMeasureWidgetState() {
-    startBatchedUpdate();
-    startBacklogTimer();
+
+    CollectionReference batchRef = Firestore.instance.collection(_batchCollection);
+    CollectionReference docRef = Firestore.instance.collection(_performanceTestCollection);
+    startBatchedUpdate(batchRef);
+    startBacklogTimer(docRef, batchRef);
+
   }
 
 
@@ -111,13 +115,13 @@ class _StreamMeasureWidgetState extends State<StreamMeasureWidget> {
   int workedOffBatches = 0;
 
 
-  void startBatchedUpdate() {
+  void startBatchedUpdate(CollectionReference batchRef) {
 
     //TODO query batches with stored last timestamp on app-start
     //if batch successfully processed, timestamp is saved (if lower??)
 
 
-    Firestore().collection(_batchCollection).snapshots().listen(loadBatch);
+    batchRef.snapshots().listen(loadBatch);
   }
 
 
@@ -133,20 +137,20 @@ class _StreamMeasureWidgetState extends State<StreamMeasureWidget> {
     }
   }
 
-  void startBacklogTimer() {
-    Timer.periodic(Duration(seconds: 3), checkBacklog);
+  void startBacklogTimer(CollectionReference docRef, CollectionReference batchRef) {
+    Timer.periodic(Duration(seconds: 3), (timer){checkBacklog(timer, docRef, batchRef);});
   }
 
-  void checkBacklog(Timer timer) {
+  void checkBacklog(Timer timer, CollectionReference docRef, CollectionReference batchRef) {
     print("checking backlog, length=" + backlog.length.toString() + ", workedOffBatches=" + workedOffBatches.toString());
     if(backlog.length != 0) {
       timer.cancel();
 
-      workOffBacklog();
+      workOffBacklog(docRef, batchRef);
     }
   }
 
-  void workOffBacklog() {
+  void workOffBacklog(CollectionReference docRef, CollectionReference batchRef) {
 
     print("#### backlog size is: " + backlog.length.toString() +
          ", pendingBatchLoads = " + pendingBatchLoads.toString());
@@ -156,13 +160,15 @@ class _StreamMeasureWidgetState extends State<StreamMeasureWidget> {
 
     for(int i=0;i<loadsToStart;i++) {
       int batchId = backlog.removeAt(0);
-      Firestore().collection(_performanceTestCollection)
-          .where('BatchID', isEqualTo: batchId).snapshots().listen((QuerySnapshot snap) {handleBatchResult(batchId, snap);});
+      //docRef.where('BatchID', isEqualTo: batchId).snapshots().listen((QuerySnapshot snap) {handleBatchResult(batchId, snap, docRef, batchRef);});
+      docRef.where('BatchID', isEqualTo: batchId).getDocuments().then((QuerySnapshot snap) {
+        handleBatchResult(batchId, snap, docRef, batchRef);
+      });
       pendingBatchLoads += 1;
     }
   }
 
-  void handleBatchResult(int batchID, QuerySnapshot snap) {
+  void handleBatchResult(int batchID, QuerySnapshot snap, CollectionReference docRef, CollectionReference batchRef) {
     pendingBatchLoads -= 1;
     workedOffBatches += 1;
 
@@ -170,9 +176,9 @@ class _StreamMeasureWidgetState extends State<StreamMeasureWidget> {
 
     updateCounter(snap);
     if(backlog.length > 0) {
-      workOffBacklog();
+      workOffBacklog(docRef, batchRef);
     } else {
-      startBacklogTimer();
+      startBacklogTimer(docRef, batchRef);
     }
   }
 

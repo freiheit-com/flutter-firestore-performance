@@ -16,8 +16,8 @@ import (
 	"google.golang.org/api/option"
 )
 
-const testCollection = "perf-test3"
-const batchCollection = "perf-test-batches"
+const testCollection = "perf-test4"
+const batchCollection = "perf-test-batches4"
 
 func main() {
 
