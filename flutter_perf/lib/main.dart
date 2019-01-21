@@ -7,9 +7,9 @@ import 'dart:math';
 
 void main() => runApp(MyApp());
 
-final String _performanceTestCollection = 'perf-test-200TS';
-final String _batchCollection = 'perf-test-batches-200TS';
-final int maxConcurrencyLoad = 5;
+final String _performanceTestCollection = 'perf-test-700TS';
+final String _batchCollection = 'perf-test-batches-700TS';
+final int maxConcurrencyLoad = 3;
 
 class MyApp extends StatelessWidget {
   // This widget is the root of your application.
@@ -159,13 +159,12 @@ class _StreamMeasureWidgetState extends State<StreamMeasureWidget> {
 
   void workOffBacklog(CollectionReference docRef, CollectionReference batchRef) {
 
-    print("#### backlog size is: " + backlog.length.toString() +
-         ", pendingBatchLoads = " + pendingBatchLoads.toString());
+    print("#### backlog size is: " + backlog.length.toString());
 
     int loadsToStart = min(backlog.length, maxConcurrencyLoad);
     loadsToStart -= pendingBatchLoads.length;
 
-    print("#### starting " + loadsToStart.toString() + " many queries " + pendingBatchLoads.toString() + " already running");
+    print("#### starting " + loadsToStart.toString() + " queries, " + pendingBatchLoads.length.toString() + " already running");
 
     checkPendingBatchLoads();
 
