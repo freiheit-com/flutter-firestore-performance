@@ -7,8 +7,8 @@ import 'dart:math';
 
 void main() => runApp(MyApp());
 
-final String _performanceTestCollection = 'perf-test3';
-final String _batchCollection = 'perf-test-batches';
+final String _performanceTestCollection = 'perf-test-200TS';
+final String _batchCollection = 'perf-test-batches-200TS';
 final int maxConcurrencyLoad = 5;
 
 class MyApp extends StatelessWidget {
@@ -89,6 +89,13 @@ void listenToFirestoreUpdate(SendPort sendPort) {
   }
 }
 
+class BatchLoad {
+  int batchID;
+  DateTime startedTime;
+
+  BatchLoad(this.batchID, this.startedTime);
+}
+
 class _StreamMeasureWidgetState extends State<StreamMeasureWidget> {
   int _counter = 0;
   int _stopCount = -1;
@@ -110,8 +117,9 @@ class _StreamMeasureWidgetState extends State<StreamMeasureWidget> {
 
 
   /** async batch load state variables **/
-  List<int> backlog = List(); //TODO that should be queue
-  int pendingBatchLoads = 0;
+  List<int> backlog = List(); //TODO that should be a queue
+  List<BatchLoad> pendingBatchLoads = new List();
+
   int workedOffBatches = 0;
 
 
@@ -119,7 +127,6 @@ class _StreamMeasureWidgetState extends State<StreamMeasureWidget> {
 
     //TODO query batches with stored last timestamp on app-start
     //if batch successfully processed, timestamp is saved (if lower??)
-
 
     batchRef.snapshots().listen(loadBatch);
   }
@@ -156,20 +163,46 @@ class _StreamMeasureWidgetState extends State<StreamMeasureWidget> {
          ", pendingBatchLoads = " + pendingBatchLoads.toString());
 
     int loadsToStart = min(backlog.length, maxConcurrencyLoad);
-    loadsToStart -= pendingBatchLoads;
+    loadsToStart -= pendingBatchLoads.length;
+
+    print("#### starting " + loadsToStart.toString() + " many queries " + pendingBatchLoads.toString() + " already running");
+
+    checkPendingBatchLoads();
 
     for(int i=0;i<loadsToStart;i++) {
       int batchId = backlog.removeAt(0);
-      //docRef.where('BatchID', isEqualTo: batchId).snapshots().listen((QuerySnapshot snap) {handleBatchResult(batchId, snap, docRef, batchRef);});
+
+      BatchLoad batchLoad = BatchLoad(batchId, DateTime.now());
+
       docRef.where('BatchID', isEqualTo: batchId).getDocuments().then((QuerySnapshot snap) {
         handleBatchResult(batchId, snap, docRef, batchRef);
       });
-      pendingBatchLoads += 1;
+      pendingBatchLoads.add(batchLoad);
     }
   }
 
+  void checkPendingBatchLoads() {
+
+    DateTime maxOldest = DateTime.now().subtract(Duration(seconds: 30));
+
+    Iterable<BatchLoad> tooLongOnes = pendingBatchLoads.where((BatchLoad batchLoad) {
+      return batchLoad.startedTime.isBefore(maxOldest);
+    });
+
+    if(tooLongOnes.length > 0) {
+      print("WARNING, batchLoad pending more than 30 seconds, ids:");
+      for(BatchLoad batchLoad in tooLongOnes) {
+        print("batchID=" + batchLoad.batchID.toString());
+      }
+    }
+  }
+
+  void remoteBatchLoad(int batchID) {
+    pendingBatchLoads.removeWhere((BatchLoad batchLoad) {return batchLoad.batchID == batchID;});
+  }
+
   void handleBatchResult(int batchID, QuerySnapshot snap, CollectionReference docRef, CollectionReference batchRef) {
-    pendingBatchLoads -= 1;
+    remoteBatchLoad(batchID);
     workedOffBatches += 1;
 
     print("##handleBatchResult, len = " + snap.documents.length.toString() + " batchID=" + batchID.toString());

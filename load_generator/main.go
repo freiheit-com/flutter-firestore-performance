@@ -16,8 +16,8 @@ import (
 	"google.golang.org/api/option"
 )
 
-const testCollection = "perf-test4"
-const batchCollection = "perf-test-batches4"
+const testCollection = "perf-test-700TS"
+const batchCollection = "perf-test-batches-700TS"
 
 func main() {
 
@@ -80,7 +80,7 @@ func addBatchedToFirestore(numBytes int, counter *int64, client *firestore.Clien
 
 		if batchCount == 500 {
 			commitBatch(batch)
-			_, _, err := batchCol.Add(context.Background(), BatchInfo{BatchID: batchID})
+			_, _, err := batchCol.Add(context.Background(), BatchInfo{BatchID: batchID, BatchSize: batchCount})
 			if err != nil {
 				log.Printf("Error adding batch info %#v\n", err)
 			}
@@ -92,7 +92,7 @@ func addBatchedToFirestore(numBytes int, counter *int64, client *firestore.Clien
 
 	if batchCount > 0 {
 		commitBatch(batch)
-		_, _, err := batchCol.Add(context.Background(), BatchInfo{BatchID: batchID})
+		_, _, err := batchCol.Add(context.Background(), BatchInfo{BatchID: batchID, BatchSize: batchCount})
 		if err != nil {
 			log.Printf("Error adding batch info %#v\n", err)
 		}
@@ -129,7 +129,8 @@ type TestData struct {
 
 //BatchInfo data
 type BatchInfo struct {
-	BatchID int64
+	BatchID   int64
+	BatchSize int
 }
 
 func createTestData(numBytes int, id int64, batchID int64) *TestData {
