@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:sqflite/sqflite.dart';
+import 'package:path/path.dart';
+
 import 'dart:isolate';
 import 'dart:io';
 import 'dart:async';
 import 'dart:math';
+
 
 void main() => runApp(MyApp());
 
@@ -96,6 +100,28 @@ class BatchLoad {
   BatchLoad(this.batchID, this.startedTime);
 }
 
+
+
+/// SQLite Database handling
+
+Database db;
+
+final String dbName = 'Data';
+
+Future<Database> openArticleDatabase() async {
+
+    var databasePath = await getDatabasesPath();
+    String path = join(databasePath, 'data.db');
+
+    return openDatabase(path, version: 1,
+        onCreate: (Database db, int version) async {
+          // When creating the db, create the table
+          await db.execute(
+              'CREATE TABLE Data (id INT PRIMARY KEY, data TEXT)');
+        });
+}
+
+/// END SQLite Database
 class _StreamMeasureWidgetState extends State<StreamMeasureWidget> {
   int _counter = 0;
   int _stopCount = -1;
@@ -108,13 +134,20 @@ class _StreamMeasureWidgetState extends State<StreamMeasureWidget> {
 
   _StreamMeasureWidgetState() {
 
-    CollectionReference batchRef = Firestore.instance.collection(_batchCollection);
-    CollectionReference docRef = Firestore.instance.collection(_performanceTestCollection);
-    startBatchedUpdate(batchRef);
-    startBacklogTimer(docRef, batchRef);
+    openArticleDatabase().then((Database dbInit) {
 
+      print("database initialised");
+      db = dbInit;
+
+      Firestore firestore = Firestore();
+      firestore.settings(persistenceEnabled: false).then((void v) {
+        CollectionReference batchRef = Firestore.instance.collection(_batchCollection);
+        CollectionReference docRef = Firestore.instance.collection(_performanceTestCollection);
+        startBatchedUpdate(batchRef);
+        startBacklogTimer(docRef, batchRef);
+      });
+    });
   }
-
 
   /** async batch load state variables **/
   List<int> backlog = List(); //TODO that should be a queue
@@ -196,13 +229,29 @@ class _StreamMeasureWidgetState extends State<StreamMeasureWidget> {
     }
   }
 
-  void remoteBatchLoad(int batchID) {
+  void remoteBatchLoaded(int batchID) {
     pendingBatchLoads.removeWhere((BatchLoad batchLoad) {return batchLoad.batchID == batchID;});
   }
 
+  void storeBatchInDB(QuerySnapshot snap) {
+
+    Batch batch = db.batch();
+
+    for(DocumentChange change in snap.documentChanges) {
+      if(change.type == DocumentChangeType.added) {
+        //TODO Do an upsert here, to overwrite old data!!!
+        batch.insert(dbName, {'id': change.document.data['DataID'], 'data': change.document.data['Data']});
+      }
+    }
+
+    batch.commit(noResult: true);
+  }
+
   void handleBatchResult(int batchID, QuerySnapshot snap, CollectionReference docRef, CollectionReference batchRef) {
-    remoteBatchLoad(batchID);
+    remoteBatchLoaded(batchID);
     workedOffBatches += 1;
+
+    storeBatchInDB(snap);
 
     print("##handleBatchResult, len = " + snap.documents.length.toString() + " batchID=" + batchID.toString());
 
@@ -326,18 +375,23 @@ class _StreamMeasureWidgetState extends State<StreamMeasureWidget> {
       queryResult = "";
     });
     print("Starting query for id: " + queryId.toString());
+
+    db.query(dbName, where: '"id"=?', whereArgs: [queryId]).then(addQueryResult);
+
+    /*
     Firestore().collection(_performanceTestCollection)
         //.orderBy('DataID', descending: true).limit(1).snapshots().listen(addQueryResult);
         .where('DataID', isEqualTo: queryId).snapshots().listen(addQueryResult);
+     */
   }
 
-  void addQueryResult(QuerySnapshot snap) {
+  void addQueryResult(List<Map<String, dynamic>> queryResultDB) {
 
-    print("received query result " + snap.documentChanges.length.toString() + " " + snap.documents.length.toString() );
+    print("received query result " + queryResultDB.toString());
 
     String result = "";
-    for (DocumentSnapshot change in snap.documents) {
-      result = result + change.data.toString() + "\n";
+    for (Map data in queryResultDB) {
+      result = result + data.toString() + "\n";
     }
     setState(() {
       queryResult = result;
